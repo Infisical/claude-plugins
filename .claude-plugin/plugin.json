@@ -1,0 +1,9 @@
+{
+  "name": "infisical-secret-scan",
+  "version": "0.2.0",
+  "description": "Blocks and surfaces secrets shared in Claude Code prompts for auditing and compliance, before they ever reach your AI agents.",
+  "author": {
+    "name": "Infisical"
+  },
+  "license": "MIT"
+}

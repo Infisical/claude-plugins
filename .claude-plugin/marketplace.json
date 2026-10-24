@@ -1,0 +1,14 @@
+{
+  "name": "infisical",
+  "owner": {
+    "name": "Infisical"
+  },
+  "description": "Infisical is the industry standard open-source platform for secrets management, giving apps, infrastructure, and AI agents secure, just-in-time access to API keys, credentials, and certificates, with automated rotation, leak scanning, and full auditability built in.",
+  "plugins": [
+    {
+      "name": "infisical-secret-scan",
+      "source": "./",
+      "description": "Blocks and surfaces secrets shared in Claude Code prompts for auditing and compliance, before they ever reach your AI agents."
+    }
+  ]
+}
