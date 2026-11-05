@@ -78,13 +78,6 @@ check_cli_version() {
   fi
 }
 
-sha256() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum | cut -d ' ' -f 1
-  else
-    shasum -a 256 | cut -d ' ' -f 1
-  fi
-}
 
 is_recent() {
   [ -n "$(find "$1" -mmin "-$2" 2>/dev/null)" ]

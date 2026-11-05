@@ -73,54 +73,65 @@ scan_prompt() {
   [ "$status" -eq "$LEAK_EXIT_CODE" ] ||
     block "Infisical: the secret scan failed (exit code $status). Run 'infisical scan --pipe' to check the CLI."
 
-  local rules
-  rules="$(jq -r '[.[].RuleID] | unique | join(", ")' "$tmp/report.json" 2>/dev/null)"
-  rules="${rules:-unknown rule}"
-
-  # Infisical computes the same fingerprint: the sha256 of the secret, so a secret that several rules match is one
-  # finding. Secrets can span lines, so they are separated by NUL.
-  local fingerprints
-  fingerprints="$(
-    jq -j '.[] | "\(.Secret)\u0000"' "$tmp/report.json" |
-      while IFS= read -r -d '' finding; do
-        printf '%s' "$finding" | sha256
-      done | jq -R . | jq -s 'unique'
-  )"
+  # One entry per distinct secret and rule. Infisical matches each value to its findings by a blind index, so the values
+  # leave the machine, but the prompt only does when a secret is new.
+  jq '{secrets: ([.[] | {value: .Secret, ruleId: .RuleID}] | unique)}' "$tmp/report.json" >"$tmp/check.json" ||
+    block "Infisical: could not read the secret scan report."
 
   local api_url
   api_url="$(infisical_api_url)"
-
-  jq --argjson fingerprints "$fingerprints" '{
-      prompt: .prompt,
-      fingerprints: $fingerprints,
-      sessionId: .session_id,
-      cwd: .cwd
-    } | with_entries(select(.value != null))' "$tmp/input.json" >"$tmp/body.json"
+  local check_url="$api_url/v2/secret-scanning/data-sources/claude-code/$DATA_SOURCE_ID"
 
   # The token goes in a header file, not on the command line, so other processes can't read it.
   printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$token" >"$tmp/headers"
 
   local http_code
-  http_code="$(curl -sS --max-time 20 -o "$tmp/response.json" -w '%{http_code}' \
-    -X POST -H @"$tmp/headers" --data-binary @"$tmp/body.json" \
-    "$api_url/v2/secret-scanning/data-sources/claude-code/$DATA_SOURCE_ID/prompts" 2>"$tmp/curl-error")"
+  http_code="$(curl -sS --max-time 15 -o "$tmp/check-response.json" -w '%{http_code}' \
+    -X POST -H @"$tmp/headers" --data-binary @"$tmp/check.json" \
+    "$check_url/check-secrets" 2>"$tmp/curl-error")"
 
   [ "$http_code" = "200" ] ||
-    block "Infisical: secret detected ($rules), and the request to Infisical failed. $(describe_api_failure "$http_code" "$tmp/response.json" "$tmp/curl-error" "$api_url")"
+    block "Infisical: secret detected, and the request to Infisical failed. $(describe_api_failure "$http_code" "$tmp/check-response.json" "$tmp/curl-error" "$api_url")"
 
-  local findings_url
-  findings_url="$(jq -r '.findingsUrl // empty' "$tmp/response.json" 2>/dev/null)"
+  # The rules of the secrets that hold the prompt back or need a warning, for the message.
+  local rules new_count pending_count findings_url
+  rules="$(jq -r '[.secrets[] | select(.status != "allowed") | .ruleId] | unique | join(", ")' "$tmp/check-response.json")"
+  new_count="$(jq '[.secrets[] | select(.status == "new-finding")] | length' "$tmp/check-response.json")"
+  pending_count="$(jq '[.secrets[] | select(.status == "pending-resolution")] | length' "$tmp/check-response.json")"
+  findings_url="$(jq -r '.findingsUrl // empty' "$tmp/check-response.json")"
 
-  if [ "$(jq -r '.allowed' "$tmp/response.json" 2>/dev/null)" = "true" ]; then
-    # A report-only data source lets unreviewed secrets through; warn the user (and not Claude) that it was reported.
-    if [ "$(jq -r '.pendingFingerprints | length' "$tmp/response.json" 2>/dev/null)" != "0" ]; then
-      jq -n --arg message "Infisical: secret detected ($rules) and reported for review. The prompt was sent to Claude.${findings_url:+ Findings: $findings_url}" \
+  # Infisical decides whether it needs the prompt: only for a secret that is new, or that came back after its finding
+  # was resolved, so it can be scanned and recorded as a new finding. Otherwise the prompt never leaves the machine.
+  if [ "$(jq -r '.promptRequired' "$tmp/check-response.json")" = "true" ]; then
+    jq --slurpfile check "$tmp/check.json" '{
+        prompt: .prompt,
+        secrets: $check[0].secrets,
+        sessionId: .session_id,
+        cwd: .cwd
+      } | with_entries(select(.value != null))' "$tmp/input.json" >"$tmp/body.json"
+
+    http_code="$(curl -sS --max-time 20 -o "$tmp/response.json" -w '%{http_code}' \
+      -X POST -H @"$tmp/headers" --data-binary @"$tmp/body.json" \
+      "$check_url/prompts" 2>"$tmp/curl-error")"
+
+    [ "$http_code" = "200" ] ||
+      block "Infisical: new secret detected ($rules), and it could not be reported to Infisical. $(describe_api_failure "$http_code" "$tmp/response.json" "$tmp/curl-error" "$api_url")"
+  fi
+
+  local review_status="is waiting for review"
+  [ "$pending_count" = "0" ] && review_status="was reported for review"
+  [ "$new_count" != "0" ] && [ "$pending_count" != "0" ] && review_status="was reported or is waiting for review"
+
+  if [ "$(jq -r '.allowed' "$tmp/check-response.json")" = "true" ]; then
+    # A report-only data source lets unreviewed secrets through; warn the user (and not Claude) about them.
+    if [ "$new_count" != "0" ] || [ "$pending_count" != "0" ]; then
+      jq -n --arg message "Infisical: secret detected ($rules). It $review_status in Infisical. The prompt was sent to Claude.${findings_url:+ Findings: $findings_url}" \
         '{systemMessage: $message}'
     fi
     exit 0
   fi
 
-  block "Infisical: secret detected ($rules). Mark the finding as resolved, false positive, or ignored in Infisical, then send the prompt again.${findings_url:+
+  block "Infisical: secret detected ($rules). It $review_status in Infisical. Send the prompt again after a reviewer marks it as false positive or ignored.${findings_url:+
 Findings: $findings_url}"
 }
 
