@@ -5,7 +5,7 @@ This plugin scans each prompt before Claude Code sends it. A prompt that contain
 ## How it works
 
 1. The plugin scans the prompt locally with `infisical scan --pipe`, using the project's scan config.
-2. If the scan finds no secret, the prompt goes to Claude. The plugin makes no API call.
+2. If the scan finds no secret, the prompt goes to Claude. The plugin sends nothing to Infisical except the login check (`infisical login status`), which runs on every prompt.
 3. If the scan finds secrets, the plugin sends only the secret values and their rule IDs to Infisical (`check-secrets`), never the prompt. Infisical matches each value by its blind index to the newest finding for that secret in the project:
 
    | Newest finding | Result |
@@ -15,7 +15,7 @@ This plugin scans each prompt before Claude Code sends it. A prompt that contain
    | False positive or ignored | Allowed, no new finding |
    | Unresolved | Waiting for review, no new finding |
 
-4. If a secret is a new finding, Infisical asks for the prompt (`promptRequired`). Only then does the plugin send it, and Infisical scans it in the background and records the findings. A prompt whose secrets are all known never leaves the machine.
+4. If a secret is a new finding, Infisical asks for the prompt (`promptRequired`). Only then does the plugin send it, and Infisical scans it in the background and records the findings. Infisical never receives a prompt whose secrets are all known.
 5. Infisical decides if the prompt continues. With "Block the prompt", it continues only when every secret is allowed. With "Report only", it always continues, and you see a warning that Claude does not see.
 6. To let developers use a secret, a reviewer marks its finding as false positive or ignored. That applies to every developer in the project.
 
@@ -23,7 +23,7 @@ The plugin fails closed. It blocks every prompt, also prompts with no secret, if
 
 ## Requirements
 
-- [Infisical CLI](https://infisical.com/docs/cli/overview) version 0.44.9 or later, logged in with `infisical login`. The plugin checks the login with `infisical login status`, then uses `infisical user get token` and the domain of your CLI login.
+- [Infisical CLI](https://infisical.com/docs/cli/overview) version 0.44.9 or later, logged in with `infisical login`. The plugin checks the login with `infisical login status`, then uses `infisical user get token` and the domain of that same session, so it follows `--profile`, `INFISICAL_PROFILE`, and folder profiles like the CLI does.
 - `jq` and `curl`
 - A Claude Code data source in Infisical Secret Scanning
 
@@ -51,7 +51,19 @@ Each data source has a "When a Secret Is Detected" setting in Infisical:
 
 ## Scan rules
 
-The local scan uses the same rules as Infisical. If your project has a custom secret scanning configuration, a background hook downloads it at most once every 24 hours. If the project has no custom configuration, both sides use the CLI defaults.
+The local scan uses the project's secret scanning configuration. If your project has a custom configuration, a background hook downloads it at most once every 24 hours. If the project has no custom configuration, the local scan uses the CLI defaults.
+
+The local scan and the scan in Infisical can still find different secrets: your CLI version can differ from the one Infisical uses, your cached configuration can be up to 48 hours old, and rules that depend on a file path act differently on a prompt. When the plugin reports a secret that the scan in Infisical misses, Infisical still records a finding for it, so a blocked secret always has a finding to review.
+
+## What the plugin scans
+
+The plugin scans only the text of the prompt. It does not scan:
+
+- the contents of files that you mention with `@`. The prompt holds only the path, and Claude Code reads the file after the hook runs.
+- files that Claude reads with its tools
+- attachments, such as images
+
+A developer can turn off the plugin or all hooks in their own Claude Code settings. To make every developer use it, install it through a managed settings file.
 
 ## Test locally
 

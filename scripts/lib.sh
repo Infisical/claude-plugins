@@ -20,35 +20,36 @@ CACHE_DIR="$DATA_DIR/${DATA_SOURCE_ID:-no-data-source}"
 SCAN_CONFIG="$CACHE_DIR/infisical-scan.toml"
 FETCHED_AT="$CACHE_DIR/fetched-at"
 
-# The API URL of the Infisical instance the CLI is logged in to.
-infisical_api_url() {
-  local domain="${INFISICAL_DOMAIN:-}"
-  local config="$HOME/.infisical/infisical-config.json"
+# Loads the CLI's logged-in user session: sets INFISICAL_TOKEN_VALUE to its access token and INFISICAL_API_URL to the
+# API of the instance it belongs to. Returns 1 when there is no valid session.
+#
+# The domain comes from `infisical login status`, which resolves the session the same way `infisical user get token`
+# does (--profile, INFISICAL_PROFILE, the profile tied to the folder, then the active profile). Reading the domain from
+# the config file instead could pair one profile's token with another profile's domain, and send the token and the
+# secret values to the wrong instance.
+#
+# Without a session, `infisical user get token` starts a login and can open the browser, so it only runs after
+# `infisical login status` finds a valid one. It can also print an error instead of a token, so only a successful run
+# that prints a JWT counts.
+load_infisical_session() {
+  local status domain output token
+  INFISICAL_TOKEN_VALUE=""
+  INFISICAL_API_URL=""
 
-  if [ -z "$domain" ] && [ -f "$config" ]; then
-    domain="$(jq -r '
-      (.activeProfile // "") as $active
-      | ([.profiles[]? | select(.name == $active) | .domain][0]) // .LoggedInUserDomain // empty
-    ' "$config" 2>/dev/null)"
-  fi
+  status="$(infisical login status --json --silent </dev/null 2>/dev/null)" || return 1
+  domain="$(printf '%s' "$status" | jq -r '[.sessions[]? | select(.principalType == "user")][0].domain // empty' 2>/dev/null)"
+  [ -n "$domain" ] || return 1
 
-  domain="${domain:-https://app.infisical.com/api}"
+  output="$(infisical user get token --plain 2>/dev/null </dev/null)" || return 1
+  token="$(printf '%s\n' "$output" | tail -n 1)"
+  [[ "$token" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]] || return 1
+
   domain="${domain%/}"
   case "$domain" in
-    */api) printf '%s' "$domain" ;;
-    *) printf '%s/api' "$domain" ;;
+    */api) INFISICAL_API_URL="$domain" ;;
+    *) INFISICAL_API_URL="$domain/api" ;;
   esac
-}
-
-# The access token of the logged-in CLI user, or nothing. Without a session, `infisical user get token` starts a login
-# and can open the browser, so it only runs after `infisical login status` finds a session. It can also print an error
-# instead of a token, so only a successful run that prints a JWT counts.
-infisical_token() {
-  local output token
-  infisical login status --json --silent </dev/null >/dev/null 2>&1 || return 0
-  output="$(infisical user get token --plain 2>/dev/null </dev/null)" || return 0
-  token="$(printf '%s\n' "$output" | tail -n 1)"
-  [[ "$token" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]] && printf '%s' "$token"
+  INFISICAL_TOKEN_VALUE="$token"
 }
 
 # True when version $1 is $2 or later. Both are MAJOR.MINOR.PATCH.
@@ -107,16 +108,15 @@ describe_api_failure() {
 # Downloads the project's secret scanning config for local scans, so they match the scan in Infisical.
 # Usage: fetch_scan_config <private work folder>. On failure, returns 1 and sets FETCH_ERROR.
 fetch_scan_config() {
-  local work="$1" token api_url code project_id
+  local work="$1" api_url code project_id
 
-  token="$(infisical_token)"
-  if [ -z "$token" ]; then
+  if ! load_infisical_session; then
     FETCH_ERROR="the Infisical CLI is not logged in. Run 'infisical login', then try again."
     return 1
   fi
 
-  api_url="$(infisical_api_url)"
-  printf 'Authorization: Bearer %s\n' "$token" >"$work/headers"
+  api_url="$INFISICAL_API_URL"
+  printf 'Authorization: Bearer %s\n' "$INFISICAL_TOKEN_VALUE" >"$work/headers"
 
   code="$(curl -sS --max-time 10 -o "$work/data-source.json" -w '%{http_code}' -H @"$work/headers" \
     "$api_url/v2/secret-scanning/data-sources/claude-code/$DATA_SOURCE_ID" 2>"$work/curl-error")"

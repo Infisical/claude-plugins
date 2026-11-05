@@ -2,6 +2,8 @@
 # Async UserPromptSubmit hook: refresh the cached secret scanning config at most once every 24 hours.
 # It never blocks a prompt. If refreshes keep failing, scan-prompt.sh blocks prompts once the cache is too old.
 
+set -o pipefail
+
 source "$(dirname "$0")/lib.sh"
 
 REFRESH_MINUTES=1440

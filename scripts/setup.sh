@@ -38,12 +38,11 @@ umask 077
 tmp="$(mktemp -d)" || fail "The setup script could not create a temporary folder."
 trap 'rm -rf "$tmp"' EXIT
 
-token="$(infisical_token)"
-[ -n "$token" ] ||
+load_infisical_session ||
   fail "The Infisical CLI is not logged in. Run 'infisical login' in a terminal, then run the setup command again."
 
-api_url="$(infisical_api_url)"
-printf 'Authorization: Bearer %s\n' "$token" >"$tmp/headers"
+api_url="$INFISICAL_API_URL"
+printf 'Authorization: Bearer %s\n' "$INFISICAL_TOKEN_VALUE" >"$tmp/headers"
 
 # Lists the Claude Code data sources in the organization's Secret Scanning project.
 code="$(curl -sS --max-time 20 -o "$tmp/list.json" -w '%{http_code}' -H @"$tmp/headers" \

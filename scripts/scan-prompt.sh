@@ -3,6 +3,10 @@
 # A prompt with secrets goes to Infisical, which allows it only when every secret was reviewed there.
 # Exit code 2 blocks the prompt and shows stderr to the user. Any failure blocks the prompt.
 
+# A failed command in a pipe must fail the pipe: otherwise a jq failure would hand the scan an empty prompt, which
+# passes.
+set -o pipefail
+
 source "$(dirname "$0")/lib.sh"
 
 LEAK_EXIT_CODE=42
@@ -48,9 +52,7 @@ scan_prompt() {
     block "Infisical: the secret scan is not set up. Run $SETUP_COMMAND to choose your data source."
 
   # Checked on every prompt, not only when a secret is found, so a logged-out CLI can't go unnoticed.
-  local token
-  token="$(infisical_token)"
-  [ -n "$token" ] ||
+  load_infisical_session ||
     block "Infisical: the CLI is not logged in. Run 'infisical login' in a terminal, then try again."
 
   if ! is_recent "$FETCHED_AT" "$MAX_CONFIG_AGE_MINUTES"; then
@@ -63,9 +65,12 @@ scan_prompt() {
   local config_args=()
   [ -f "$SCAN_CONFIG" ] && config_args=(--config "$SCAN_CONFIG")
 
-  jq -j '.prompt // ""' "$tmp/input.json" |
-    infisical scan --pipe "${config_args[@]}" --silent --no-color \
-      --exit-code "$LEAK_EXIT_CODE" --report-format json --report-path "$tmp/report.json" >/dev/null 2>&1
+  # Written to the private folder first, so a jq failure blocks the prompt instead of scanning nothing.
+  jq -j '.prompt // ""' "$tmp/input.json" >"$tmp/prompt.txt" 2>/dev/null ||
+    block "Infisical: could not read the prompt to scan it."
+
+  infisical scan --pipe "${config_args[@]}" --silent --no-color \
+    --exit-code "$LEAK_EXIT_CODE" --report-format json --report-path "$tmp/report.json" <"$tmp/prompt.txt" >/dev/null 2>&1
   local status=$?
 
   [ "$status" -eq 0 ] && exit 0
@@ -78,12 +83,11 @@ scan_prompt() {
   jq '{secrets: ([.[] | {value: .Secret, ruleId: .RuleID}] | unique)}' "$tmp/report.json" >"$tmp/check.json" ||
     block "Infisical: could not read the secret scan report."
 
-  local api_url
-  api_url="$(infisical_api_url)"
+  local api_url="$INFISICAL_API_URL"
   local check_url="$api_url/v2/secret-scanning/data-sources/claude-code/$DATA_SOURCE_ID"
 
   # The token goes in a header file, not on the command line, so other processes can't read it.
-  printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$token" >"$tmp/headers"
+  printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$INFISICAL_TOKEN_VALUE" >"$tmp/headers"
 
   local http_code
   http_code="$(curl -sS --max-time 15 -o "$tmp/check-response.json" -w '%{http_code}' \
@@ -101,7 +105,7 @@ scan_prompt() {
   findings_url="$(jq -r '.findingsUrl // empty' "$tmp/check-response.json")"
 
   # Infisical decides whether it needs the prompt: only for a secret that is new, or that came back after its finding
-  # was resolved, so it can be scanned and recorded as a new finding. Otherwise the prompt never leaves the machine.
+  # was resolved, so it can be scanned and recorded as a new finding. Otherwise Infisical never receives the prompt.
   if [ "$(jq -r '.promptRequired' "$tmp/check-response.json")" = "true" ]; then
     jq --slurpfile check "$tmp/check.json" '{
         prompt: .prompt,
