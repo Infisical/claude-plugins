@@ -78,9 +78,11 @@ case "$1" in
     [ "$(jq 'length' "$tmp/data-sources.json")" -gt 0 ] ||
       fail "There are no Claude Code data sources in your organization's Secret Scanning project. Ask an admin to create one in Infisical, then run the setup command again."
 
+    # The saved data source can be gone, for example deleted in Infisical. Its name is then null: a bare select would
+    # give no value, and jq would print no object at all.
     jq -n --slurpfile dataSources "$tmp/data-sources.json" --arg current "$DATA_SOURCE_ID" '{
         ok: true,
-        current: (if $current == "" then null else ($dataSources[0][] | select(.id == $current) | .name) end),
+        current: ([$dataSources[0][] | select(.id == $current) | .name][0]),
         dataSources: [$dataSources[0][] | {id, name, description, onSecretDetected}]
       }'
     ;;
