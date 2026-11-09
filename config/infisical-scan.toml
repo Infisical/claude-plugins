@@ -1,6 +1,7 @@
 # Default scan config for the Infisical Claude Code plugin.
 #
-# To use your own rules instead, put a config at ~/.claude/plugins/data/infisical-secret-scanner-infisical/infisical-scan.toml.
+# To use your own rules instead, put a config at
+# ~/.claude/plugins/data/infisical-secret-scanner-infisical/infisical-scan.toml.
 # Start it with the [extend] block below to keep the default rules.
 
 title = "Infisical Claude Code plugin"

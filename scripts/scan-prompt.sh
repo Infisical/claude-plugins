@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # UserPromptSubmit hook: scans the prompt on this machine with `infisical scan --pipe` and blocks it when it holds a
-# secret that hasn't been allowed. It also runs /infisical-secret-scanner:allow-secret and /infisical-secret-scanner:disallow-secret itself, so the
-# value given to those commands is never sent to Claude. Nothing is sent to Infisical. Any failure blocks the prompt.
+# secret that hasn't been allowed. It also runs /infisical-secret-scanner:allow-secret and
+# /infisical-secret-scanner:disallow-secret itself, so the value given to those commands is never sent to Claude.
+# Nothing is sent to Infisical. Any failure blocks the prompt.
 
 set -o pipefail
 
@@ -105,7 +106,7 @@ value_hashes() {
 allow_secret() {
   local hash
 
-  [ -s "$1" ] || block "Infisical: give the secret to allow, for example: $ALLOW_COMMAND <secret>"
+  [ -s "$1" ] || block "Infisical: put the secret to allow after the command: $ALLOW_COMMAND <secret>"
   value_hashes "$1"
 
   mkdir -p "$DATA_DIR" && touch "$ALLOWLIST" || block "Infisical: could not save the allowed secret in $DATA_DIR."
@@ -122,7 +123,7 @@ Claude Code labels this as blocked because the plugin keeps the command from Cla
 
 # Usage: disallow_secret <file holding the value given to the command>
 disallow_secret() {
-  [ -s "$1" ] || block "Infisical: give the secret to disallow, for example: $DISALLOW_COMMAND <secret>"
+  [ -s "$1" ] || block "Infisical: put the secret to disallow after the command: $DISALLOW_COMMAND <secret>"
   value_hashes "$1"
 
   [ -f "$ALLOWLIST" ] && grep -qxF -f "$tmp/hashes" "$ALLOWLIST" ||
@@ -133,7 +134,9 @@ disallow_secret() {
   [ $? -le 1 ] && cat "$tmp/allowlist" >"$ALLOWLIST" ||
     block "Infisical: could not remove the secret from $ALLOWLIST, so it is still allowed."
 
-  block "Infisical: the secret is no longer allowed. Prompts that contain it are blocked again."
+  # Labeled as blocked by Claude Code, for the same reason as the allow_secret confirmation.
+  block "Infisical: secret disallowed. Prompts that contain it are blocked again.
+Claude Code labels this as blocked because the plugin keeps the command from Claude, so the secret is never sent."
 }
 
 umask 077
