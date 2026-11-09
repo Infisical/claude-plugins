@@ -24,13 +24,18 @@ SCAN_CONFIG="$PLUGIN_ROOT/config/infisical-scan.toml"
 block() {
   if command -v jq >/dev/null 2>&1; then
     jq -n --arg reason "$1" \
-      '{decision: "block", reason: $reason, hookSpecificOutput: {hookEventName: "UserPromptSubmit", suppressOriginalPrompt: true}}'
+      '{decision: "block", reason: $reason, hookSpecificOutput: {hookEventName: "UserPromptSubmit", suppressOriginalPrompt: true}}' &&
+      exit 0
   else
     local reason="${1//\\/\\\\}"
     reason="${reason//\"/\\\"}"
-    printf '{"decision": "block", "reason": "%s", "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": true}}\n' "$reason"
+    printf '{"decision": "block", "reason": "%s", "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": true}}\n' "$reason" &&
+      exit 0
   fi
-  exit 0
+  # The JSON could not be written, for example because jq is installed but can't run. Exit code 2 also blocks the
+  # prompt and shows stderr to the user only.
+  echo "$1" >&2
+  exit 2
 }
 
 sha256() {
@@ -80,8 +85,7 @@ value_hashes() {
     *) scan_failed "$status" ;;
   esac
 
-  mkdir -p "$tmp/values"
-  cp "$value_file" "$tmp/values/raw"
+  mkdir -p "$tmp/values" && cp "$value_file" "$tmp/values/raw" || block "Infisical: could not read the value."
   # A value given in quotes also applies to the value without them.
   jq -Rsj 'if test("\\A([\"'"'"'`]).*\\1\\z"; "s") then .[1:-1] else empty end' "$value_file" >"$tmp/values/unquoted" ||
     block "Infisical: could not read the value."
@@ -136,7 +140,7 @@ umask 077
 tmp="$(mktemp -d)" || block "Infisical: the secret scan could not create a temporary folder, so the prompt was not sent."
 trap 'rm -rf "$tmp"' EXIT
 
-cat >"$tmp/input.json"
+cat >"$tmp/input.json" || block "Infisical: could not read the prompt to scan it, so it was not sent."
 
 command -v infisical >/dev/null 2>&1 ||
   block "Infisical: the Infisical CLI is not installed, so prompts can't be scanned for secrets and are not sent. Install it: https://infisical.com/docs/cli/overview"
