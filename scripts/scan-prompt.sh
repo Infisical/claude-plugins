@@ -109,7 +109,11 @@ allow_secret() {
     is_allowed "$hash" || echo "$hash" >>"$ALLOWLIST" || block "Infisical: could not save the allowed secret in $ALLOWLIST."
   done <"$tmp/hashes"
 
-  block "Infisical: the secret is allowed. Prompts that contain it are no longer blocked."
+  # decision: block is the only way to stop a prompt without it joining the conversation, so Claude Code labels this
+  # confirmation as blocked. continue: false shows a softer label but adds the typed command, secret included, to
+  # what Claude sees on the next turn.
+  block "Infisical: secret allowed. Prompts that contain it are no longer blocked.
+Claude Code labels this as blocked because the plugin keeps the command from Claude, so the secret is never sent."
 }
 
 # Usage: disallow_secret <file holding the value given to the command>
