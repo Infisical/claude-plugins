@@ -1,5 +1,5 @@
 {
-  "name": "infisical",
+  "name": "infisical-secret-scanner",
   "version": "1.0.0",
   "description": "Blocks Claude Code prompts that contain secrets. Scans every prompt locally with the Infisical CLI; nothing is sent to Infisical.",
   "author": {

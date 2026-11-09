@@ -22,7 +22,7 @@ The plugin fails closed: if the CLI or `jq` is missing, if the scan fails, or if
 
 ```
 claude plugin marketplace add Infisical/claude-code-plugin
-claude plugin install infisical@infisical
+claude plugin install infisical-secret-scanner@infisical
 ```
 
 ## Allow a secret
@@ -30,18 +30,26 @@ claude plugin install infisical@infisical
 If a value is safe to share with Claude, for example a test key, allow it:
 
 ```
-/infisical:allow-secret <secret>
+/infisical-secret-scanner:allow-secret <secret>
 ```
 
 The hook handles this command itself and blocks it, so the value is never sent to Claude. Prompts that contain the value are no longer blocked. You can pass the bare value, a quoted value, or a whole line such as `STRIPE_KEY=sk_test_...`; the plugin allows every secret the scanner finds in it.
 
-The plugin stores only the SHA-256 hash of each allowed value, in `~/.claude/plugins/data/infisical-infisical/allowed-secrets`. To stop allowing a value, delete its line from that file, or delete the file to clear all of them.
+The plugin stores only the SHA-256 hash of each allowed value, in `~/.claude/plugins/data/infisical-secret-scanner-infisical/allowed-secrets`. To clear all of them, delete that file.
+
+To stop allowing a value, disallow it:
+
+```
+/infisical-secret-scanner:disallow-secret <secret>
+```
+
+The hook handles this command the same way, so the value is never sent to Claude. Pass the same value, quoted value, or line that you passed to `/infisical-secret-scanner:allow-secret`.
 
 ## Scan rules
 
 The plugin scans with [`config/infisical-scan.toml`](config/infisical-scan.toml): the CLI's default rules, plus an allowlist for placeholder values such as `<your-token>`. A `.infisical-scan.toml` in your project does not change the scan.
 
-To use your own rules, put a config at `~/.claude/plugins/data/infisical-infisical/infisical-scan.toml`. It replaces the plugin's config. Start it with this block to keep the default rules:
+To use your own rules, put a config at `~/.claude/plugins/data/infisical-secret-scanner-infisical/infisical-scan.toml`. It replaces the plugin's config. Start it with this block to keep the default rules:
 
 ```toml
 [extend]
@@ -51,7 +59,7 @@ useDefault = true
 ## Limits
 
 - The plugin scans only the text of the prompt. It doesn't scan files you mention with `@` (the prompt holds only the path), files Claude reads with its tools, or images.
-- A blocked prompt never reaches Claude, but Claude Code still writes the text you typed, including the value you pass to `/infisical:allow-secret`, to local files such as your prompt history and the session transcript. See [Claude Code's local data](https://code.claude.com/docs/en/claude-directory).
+- A blocked prompt never reaches Claude, but Claude Code still writes the text you typed, including the value you pass to `/infisical-secret-scanner:allow-secret` or `/infisical-secret-scanner:disallow-secret`, to local files such as your prompt history and the session transcript. See [Claude Code's local data](https://code.claude.com/docs/en/claude-directory).
 - A developer can turn off the plugin or all hooks in their own Claude Code settings. To require it for every developer, install it through a managed settings file.
 
 ## Test locally
