@@ -25,19 +25,23 @@ SCAN_CONFIG="$PLUGIN_ROOT/config/infisical-scan.toml"
 # Ends the turn without sending the prompt, and shows the message to the user only. suppressOriginalPrompt keeps the
 # prompt, which can hold a secret, out of the message.
 block() {
+  # Every message starts with two line breaks.
+  local reason=$'\n'"$1"
+
   if command -v jq >/dev/null 2>&1; then
-    jq -n --arg reason "$1" \
+    jq -n --arg reason "$reason" \
       '{decision: "block", reason: $reason, hookSpecificOutput: {hookEventName: "UserPromptSubmit", suppressOriginalPrompt: true}}' &&
       exit 0
   else
-    local reason="${1//\\/\\\\}"
-    reason="${reason//\"/\\\"}"
-    printf '{"decision": "block", "reason": "%s", "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": true}}\n' "$reason" &&
+    local json="${reason//\\/\\\\}"
+    json="${json//\"/\\\"}"
+    json="${json//$'\n'/\\n}"
+    printf '{"decision": "block", "reason": "%s", "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": true}}\n' "$json" &&
       exit 0
   fi
   # The JSON could not be written, for example because jq is installed but can't run. Exit code 2 also blocks the
   # prompt and shows stderr to the user only.
-  echo "$1" >&2
+  printf '%s\n' "$reason" >&2
   exit 2
 }
 
@@ -120,7 +124,7 @@ allow_secret() {
   # confirmation as blocked. continue: false shows a softer label but adds the typed command, secret included, to
   # what Claude sees on the next turn.
   block "Infisical: secret allowed. Prompts that contain it are no longer blocked.
-Claude Code labels this as blocked because the plugin keeps the command from Claude, so the secret is never sent."
+You can now create a new prompt with the secret you allow-listed, and future prompts containing the secret will not be blocked."
 }
 
 # Usage: disallow_secret <file holding the value given to the command>
@@ -138,8 +142,7 @@ disallow_secret() {
   [ -n "$found" ] || block "Infisical: the secret was not allowed, so nothing changed."
 
   # Labeled as blocked by Claude Code, for the same reason as the allow_secret confirmation.
-  block "Infisical: secret disallowed. Prompts that contain it are blocked again.
-Claude Code labels this as blocked because the plugin keeps the command from Claude, so the secret is never sent."
+  block "Infisical: secret disallowed. Prompts that contain will now be blocked in the future."
 }
 
 umask 077
