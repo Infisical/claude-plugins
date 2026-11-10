@@ -35,7 +35,7 @@ If a value is safe to share with Claude, for example a test key, allow it:
 
 The hook handles this command itself and blocks it, so the value is never sent to Claude. That's why Claude Code shows the confirmation under "UserPromptSubmit operation blocked by hook". Prompts that contain the value are no longer blocked. You can pass the bare value, a quoted value, or a whole line such as `STRIPE_KEY=sk_test_...`; the plugin allows every secret the scanner finds in it.
 
-The plugin stores only the SHA-256 hash of each allowed value, in `~/.claude/plugins/data/infisical-secret-scanner-infisical/allowed-secrets`. To clear all of them, delete that file.
+The plugin stores only the SHA-256 hash of each allowed value, as the name of an empty file in `~/.claude/plugins/data/infisical-secret-scanner-infisical/allowlist/`. To clear all of them, delete that folder.
 
 To stop allowing a value, disallow it:
 

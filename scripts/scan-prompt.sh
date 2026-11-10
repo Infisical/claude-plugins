@@ -11,9 +11,10 @@ DISALLOW_COMMAND="/infisical-secret-scanner:disallow-secret"
 LEAK_EXIT_CODE=42
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DATA_DIR="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/infisical-secret-scanner-infisical}"
-# SHA-256 hashes of the allowed secret values, one per line. The values themselves are never stored.
-ALLOWLIST="$DATA_DIR/allowed-secrets"
-LOCK="$ALLOWLIST.lock"
+# One empty file for each allowed secret value, named after the SHA-256 hash of the value. The values themselves are
+# never stored. A command only creates or deletes its own files, so sessions that change the list at the same time
+# can't undo each other's changes, and no lock is needed.
+ALLOWLIST="$DATA_DIR/allowlist"
 
 # The scan must not reach the network: no telemetry event, no update check.
 export INFISICAL_DISABLE_TELEMETRY=1 INFISICAL_DISABLE_UPDATE_CHECK=1
@@ -60,25 +61,7 @@ scan_failed() {
 }
 
 is_allowed() {
-  [ -f "$ALLOWLIST" ] && grep -qxF "$1" "$ALLOWLIST"
-}
-
-# Takes the lock that allow_secret and disallow_secret hold while they change the allowlist, so that two sessions can't
-# undo each other's changes. mkdir is atomic, so only one hook can create the lock folder.
-lock_allowlist() {
-  local i
-
-  mkdir -p "$DATA_DIR" || block "Infisical: could not create $DATA_DIR, so nothing changed."
-  for ((i = 0; i < 100; i++)); do
-    if mkdir "$LOCK" 2>/dev/null; then
-      trap 'rm -f "$ALLOWLIST.new"; rmdir "$LOCK"; rm -rf "$tmp"' EXIT
-      return 0
-    fi
-    # The hook times out after 30 seconds, so a lock older than a minute was left by a hook that was stopped.
-    [ -n "$(find "$LOCK" -maxdepth 0 -mmin +1 2>/dev/null)" ] && rmdir "$LOCK" 2>/dev/null
-    sleep 0.1
-  done
-  block "Infisical: another session is changing the allowed secrets, so nothing changed. Try again."
+  [ -f "$ALLOWLIST/$1" ]
 }
 
 # Usage: command_value <command>. When the prompt runs the command, writes the value given to it to $tmp/value.txt.
@@ -128,16 +111,10 @@ allow_secret() {
   [ -s "$1" ] || block "Infisical: put the secret to allow after the command: $ALLOW_COMMAND <secret>"
   value_hashes "$1"
 
-  lock_allowlist
-  # The new list is written next to the allowlist and then moved over it, so a scan never reads a partial list and a
-  # failed write keeps the old list.
-  { [ ! -f "$ALLOWLIST" ] || cat "$ALLOWLIST"; } >"$ALLOWLIST.new" ||
-    block "Infisical: could not save the allowed secret in $ALLOWLIST."
+  mkdir -p "$ALLOWLIST" || block "Infisical: could not save the allowed secret in $ALLOWLIST."
   while read -r hash; do
-    grep -qxF "$hash" "$ALLOWLIST.new" || echo "$hash" >>"$ALLOWLIST.new" ||
-      block "Infisical: could not save the allowed secret in $ALLOWLIST."
+    : >"$ALLOWLIST/$hash" || block "Infisical: could not save the allowed secret in $ALLOWLIST."
   done <"$tmp/hashes"
-  mv -f "$ALLOWLIST.new" "$ALLOWLIST" || block "Infisical: could not save the allowed secret in $ALLOWLIST."
 
   # decision: block is the only way to stop a prompt without it joining the conversation, so Claude Code labels this
   # confirmation as blocked. continue: false shows a softer label but adds the typed command, secret included, to
@@ -148,17 +125,17 @@ Claude Code labels this as blocked because the plugin keeps the command from Cla
 
 # Usage: disallow_secret <file holding the value given to the command>
 disallow_secret() {
+  local hash found=""
+
   [ -s "$1" ] || block "Infisical: put the secret to disallow after the command: $DISALLOW_COMMAND <secret>"
   value_hashes "$1"
 
-  lock_allowlist
-  [ -f "$ALLOWLIST" ] && grep -qxF -f "$tmp/hashes" "$ALLOWLIST" ||
-    block "Infisical: the secret was not allowed, so nothing changed."
-
-  # grep exits with 1 when it removes every line. The new list replaces the allowlist in one step, as in allow_secret.
-  grep -vxF -f "$tmp/hashes" "$ALLOWLIST" >"$ALLOWLIST.new"
-  [ $? -le 1 ] && mv -f "$ALLOWLIST.new" "$ALLOWLIST" ||
-    block "Infisical: could not remove the secret from $ALLOWLIST, so it is still allowed."
+  while read -r hash; do
+    is_allowed "$hash" || continue
+    found=1
+    rm -f "$ALLOWLIST/$hash" || block "Infisical: could not remove the secret from $ALLOWLIST, so it is still allowed."
+  done <"$tmp/hashes"
+  [ -n "$found" ] || block "Infisical: the secret was not allowed, so nothing changed."
 
   # Labeled as blocked by Claude Code, for the same reason as the allow_secret confirmation.
   block "Infisical: secret disallowed. Prompts that contain it are blocked again.
