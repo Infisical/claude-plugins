@@ -9,8 +9,9 @@ set -o pipefail
 ALLOW_COMMAND="/infisical-secret-scanner:allow-secret"
 DISALLOW_COMMAND="/infisical-secret-scanner:disallow-secret"
 LEAK_EXIT_CODE=42
-PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DATA_DIR="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/infisical-secret-scanner-infisical}"
+# Claude Code gives the hook CLAUDE_PLUGIN_ROOT, the plugin's installed folder, and CLAUDE_PLUGIN_DATA, a folder for the
+# plugin's data that is kept across plugin updates.
+DATA_DIR="${CLAUDE_PLUGIN_DATA}"
 # One empty file for each allowed secret value, named after the SHA-256 hash of the value. The values themselves are
 # never stored. A command only creates or deletes its own files, so sessions that change the list at the same time
 # can't undo each other's changes, and no lock is needed.
@@ -18,9 +19,6 @@ ALLOWLIST="$DATA_DIR/allowlist"
 
 # The scan must not reach the network: no telemetry event, no update check.
 export INFISICAL_DISABLE_TELEMETRY=1 INFISICAL_DISABLE_UPDATE_CHECK=1
-
-SCAN_CONFIG="$PLUGIN_ROOT/config/infisical-scan.toml"
-[ -f "$DATA_DIR/infisical-scan.toml" ] && SCAN_CONFIG="$DATA_DIR/infisical-scan.toml"
 
 # Ends the turn without sending the prompt, and shows the message to the user only. suppressOriginalPrompt keeps the
 # prompt, which can hold a secret, out of the message.
@@ -155,6 +153,11 @@ command -v infisical >/dev/null 2>&1 ||
   block "Infisical: the Infisical CLI is not installed, so prompts can't be scanned for secrets and are not sent. Install it: https://infisical.com/docs/cli/overview"
 command -v jq >/dev/null 2>&1 ||
   block "Infisical: jq is not installed, so prompts can't be scanned for secrets and are not sent. Install it: https://jqlang.org/download"
+[ -n "$CLAUDE_PLUGIN_ROOT" ] && [ -n "$DATA_DIR" ] ||
+  block "Infisical: Claude Code did not give the hook the plugin's folders, so prompts can't be scanned for secrets and are not sent. Update Claude Code."
+
+SCAN_CONFIG="${CLAUDE_PLUGIN_ROOT}/config/infisical-scan.toml"
+[ -f "$DATA_DIR/infisical-scan.toml" ] && SCAN_CONFIG="$DATA_DIR/infisical-scan.toml"
 
 command_value "$ALLOW_COMMAND" && allow_secret "$tmp/value.txt"
 command_value "$DISALLOW_COMMAND" && disallow_secret "$tmp/value.txt"
