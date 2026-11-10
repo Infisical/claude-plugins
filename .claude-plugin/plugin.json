@@ -1,7 +1,7 @@
 {
-  "name": "infisical-secret-scan",
-  "version": "0.2.0",
-  "description": "Blocks and surfaces secrets shared in Claude Code prompts for auditing and compliance, before they ever reach your AI agents.",
+  "name": "infisical-secret-scanner",
+  "version": "1.0.0",
+  "description": "Blocks Claude Code prompts that contain secrets. Scans every prompt locally with the Infisical CLI; nothing is sent to Infisical.",
   "author": {
     "name": "Infisical"
   },

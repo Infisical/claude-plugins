@@ -1,72 +1,69 @@
-# Infisical Secret Scan for Claude Code
+# Infisical for Claude Code
 
-This plugin scans each prompt before Claude Code sends it. A prompt that contains a secret is blocked until someone reviews the secret in Infisical, or, with a report-only data source, the secret is reported and the prompt continues.
+This plugin blocks Claude Code prompts that contain secrets, such as API keys, tokens, private keys, and database connection strings, before they reach Claude.
+
+Everything runs on your machine. The plugin scans each prompt with the Infisical CLI's secret scanner and sends nothing to Infisical. You don't need an Infisical account or a login.
 
 ## How it works
 
-1. The plugin scans the prompt locally with `infisical scan --pipe`, using the project's scan config.
-2. If the scan finds no secret, the prompt goes to Claude. The plugin sends nothing to Infisical except the login check (`infisical login status`), which runs on every prompt.
-3. If the scan finds secrets, the plugin sends only the secret values and their rule IDs to Infisical (`check-secrets`), never the prompt. Infisical matches each value by its blind index to the newest finding for that secret in the project:
+1. When you send a prompt, a `UserPromptSubmit` hook scans its text with `infisical scan --pipe`. Pasted text is scanned too.
+2. If the scan finds no secret, or only secrets you allowed, the prompt goes to Claude.
+3. If it finds a secret, the prompt is not sent. You see which rules matched, on which line, and the first characters of each secret. Claude never sees the prompt or the message.
 
-   | Newest finding | Result |
-   |---|---|
-   | None | New finding |
-   | Resolved | New finding (the secret came back; the resolved finding stays as history) |
-   | False positive or ignored | Allowed, no new finding |
-   | Unresolved | Waiting for review, no new finding |
-
-4. If a secret is a new finding, Infisical asks for the prompt (`promptRequired`). Only then does the plugin send it, and Infisical scans it in the background and records the findings. Infisical never receives a prompt whose secrets are all known.
-5. Infisical decides if the prompt continues. With "Block the prompt", it continues only when every secret is allowed. With "Report only", it always continues, and you see a warning that Claude does not see.
-6. To let developers use a secret, a reviewer marks its finding as false positive or ignored. That applies to every developer in the project.
-
-The plugin fails closed. It blocks every prompt, also prompts with no secret, if the CLI, `jq`, or `curl` is not installed, if setup is not done, if the CLI is not logged in, or if it must load the scan config and the load fails. It also blocks a prompt if the scan fails, if a request to Infisical fails, or if the check takes more than 45 seconds. Claude Code lets a prompt through when a hook passes its timeout, so the hook stops itself first.
+The plugin fails closed: if the CLI or `jq` is missing, if the scan fails, or if the hook crashes or times out, the prompt is not sent.
 
 ## Requirements
 
-- [Infisical CLI](https://infisical.com/docs/cli/overview) version 0.44.9 or later, logged in with `infisical login`. The plugin checks the login with `infisical login status`, then uses `infisical user get token` and the domain of that same session, so it follows `--profile`, `INFISICAL_PROFILE`, and folder profiles like the CLI does.
-- `jq` and `curl`
-- A Claude Code data source in Infisical Secret Scanning
+- [Infisical CLI](https://infisical.com/docs/cli/overview). Use a recent version; the plugin is tested with 0.45.4.
+- [jq](https://jqlang.org/download)
+- Claude Code 2.1.295 or later. Older versions let a prompt through when the hook times out.
 
-## Setup
+## Install
 
-1. Install the plugin:
+```
+claude plugin marketplace add Infisical/claude-code-plugin
+claude plugin install infisical-secret-scanner@infisical
+```
 
-   ```
-   claude plugin marketplace add Infisical/claude-code-plugin
-   claude plugin install infisical-secret-scan@infisical
-   ```
+## Allow a secret
 
-2. In Claude Code, run `/infisical-secret-scan:setup`. It checks the CLI and the login, lists your Claude Code data sources, and saves the one you pick. You only do this once. Run it again to change the data source.
+If a value is safe to share with Claude, for example a test key, allow it:
 
-Until setup is done, the plugin blocks every prompt. The setup command itself is never blocked.
+```
+/infisical-secret-scanner:allow-secret <secret>
+```
 
-An admin can set the data source for every developer with the `INFISICAL_CLAUDE_CODE_DATA_SOURCE_ID` env var, for example in a managed Claude Code settings file. The env var wins over the developer's choice.
+The hook handles this command itself and blocks it, so the value is never sent to Claude. That's why Claude Code shows the confirmation under "UserPromptSubmit operation blocked by hook". Prompts that contain the value are no longer blocked. You can pass the bare value, a quoted value, or a whole line such as `STRIPE_KEY=sk_test_...`; the plugin allows every secret the scanner finds in it.
 
-## Block or report
+The plugin stores only the SHA-256 hash of each allowed value, as the name of an empty file in `~/.claude/plugins/data/infisical-secret-scanner-infisical/allowlist/`. To clear all of them, delete that folder.
 
-Each data source has a "When a Secret Is Detected" setting in Infisical:
+To stop allowing a value, disallow it:
 
-- **Block the prompt** (default): the prompt is blocked until every secret in it is reviewed in Infisical.
-- **Report only**: the prompt goes to Claude, the secret is recorded as a finding, and you see a warning. Claude does not see the warning.
+```
+/infisical-secret-scanner:disallow-secret <secret>
+```
+
+The hook handles this command the same way, so the value is never sent to Claude. Pass the same value, quoted value, or line that you passed to `/infisical-secret-scanner:allow-secret`.
 
 ## Scan rules
 
-The local scan uses the project's secret scanning configuration. If your project has a custom configuration, a background hook downloads it at most once every 24 hours. If the project has no custom configuration, the local scan uses the CLI defaults.
+The plugin scans with [`config/infisical-scan.toml`](config/infisical-scan.toml): the CLI's default rules, plus an allowlist for placeholder values such as `<your-token>`. A `.infisical-scan.toml` in your project does not change the scan.
 
-The local scan and the scan in Infisical can still find different secrets: your CLI version can differ from the one Infisical uses, your cached configuration can be up to 48 hours old, and rules that depend on a file path act differently on a prompt. When the plugin reports a secret that the scan in Infisical misses, Infisical still records a finding for it, so a blocked secret always has a finding to review.
+To use your own rules, put a config at `~/.claude/plugins/data/infisical-secret-scanner-infisical/infisical-scan.toml`. It replaces the plugin's config. Start it with this block to keep the default rules:
 
-## What the plugin scans
+```toml
+[extend]
+useDefault = true
+```
 
-The plugin scans only the text of the prompt. It does not scan:
+## Limits
 
-- the contents of files that you mention with `@`. The prompt holds only the path, and Claude Code reads the file after the hook runs.
-- files that Claude reads with its tools
-- attachments, such as images
-
-A developer can turn off the plugin or all hooks in their own Claude Code settings. To make every developer use it, install it through a managed settings file.
+- The plugin scans only the text of the prompt. It doesn't scan files you mention with `@` (the prompt holds only the path), files Claude reads with its tools, or images.
+- A blocked prompt never reaches Claude, but Claude Code still writes the text you typed, including the value you pass to `/infisical-secret-scanner:allow-secret` or `/infisical-secret-scanner:disallow-secret`, to local files such as your prompt history and the session transcript. See [Claude Code's local data](https://code.claude.com/docs/en/claude-directory).
+- A developer can turn off the plugin or all hooks in their own Claude Code settings. To require it for every developer, install it through a managed settings file.
 
 ## Test locally
 
 ```
-claude --plugin-dir /path/to/infisical-claude-plugin
+claude --plugin-dir /path/to/claude-code-plugin
 ```
