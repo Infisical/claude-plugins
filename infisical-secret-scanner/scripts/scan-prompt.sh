@@ -184,7 +184,7 @@ done
 # Only a short prefix of each secret is shown, enough to find it in the prompt.
 findings="$(jq -r --argjson blocked "$(printf '%s\n' "${blocked[@]}" | jq -s '.')" '
   [.[$blocked[]]] | unique_by(.Secret) | sort_by(.StartLine, .StartColumn) | .[] |
-  "  - \(.RuleID) on line \(.StartLine)" + (if (.Secret | length) >= 16 then ": \(.Secret[0:4])..." else "" end)
+  "  - \(.RuleID) on line \(.StartLine)" + (if (.Secret | length) >= 16 then ", starts with \(.Secret[0:4])" else "" end)
 ' "$tmp/report.json")" || block "Infisical: could not read the secret scan report, so the prompt was not sent."
 
 block "Infisical: the prompt was not sent because it contains secrets:
