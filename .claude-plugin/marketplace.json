@@ -1,9 +1,12 @@
 {
   "name": "infisical",
   "owner": {
-    "name": "Infisical"
+    "name": "Infisical",
+    "email": "support@infisical.com"
+
   },
   "metadata": {
+    "version": "0.0.1",
     "description": "Infisical is the industry standard open-source platform for secrets management, giving apps, infrastructure, and AI agents secure, just-in-time access to API keys, credentials, and certificates, with automated rotation, leak scanning, and full auditability built in."
   },
   "plugins": [
