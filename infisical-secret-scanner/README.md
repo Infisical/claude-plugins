@@ -30,7 +30,7 @@ claude plugin install infisical-secret-scanner@infisical
 If a value is safe to share with Claude, for example a test key, allow it:
 
 ```
-/infisical-secret-scanner:allow-secret <secret>
+/infisical-secret-scanner:allow <secret>
 ```
 
 The hook handles this command itself and blocks it, so the value is never sent to Claude. That's why Claude Code shows the confirmation under "UserPromptSubmit operation blocked by hook". Prompts that contain the value are no longer blocked. You can pass the bare value, a quoted value, or a whole line such as `STRIPE_KEY=sk_test_...`; the plugin allows every secret the scanner finds in it.
@@ -40,10 +40,10 @@ The plugin stores only the SHA-256 hash of each allowed value, as the name of an
 To stop allowing a value, disallow it:
 
 ```
-/infisical-secret-scanner:disallow-secret <secret>
+/infisical-secret-scanner:disallow <secret>
 ```
 
-The hook handles this command the same way, so the value is never sent to Claude. Pass the same value, quoted value, or line that you passed to `/infisical-secret-scanner:allow-secret`.
+The hook handles this command the same way, so the value is never sent to Claude. Pass the same value, quoted value, or line that you passed to `/infisical-secret-scanner:allow`.
 
 ## Scan rules
 
@@ -59,7 +59,7 @@ useDefault = true
 ## Limits
 
 - The plugin scans only the text of the prompt. It doesn't scan files you mention with `@` (the prompt holds only the path), files Claude reads with its tools, or images.
-- A blocked prompt never reaches Claude, but Claude Code still writes the text you typed, including the value you pass to `/infisical-secret-scanner:allow-secret` or `/infisical-secret-scanner:disallow-secret`, to local files such as your prompt history and the session transcript. See [Claude Code's local data](https://code.claude.com/docs/en/claude-directory).
+- A blocked prompt never reaches Claude, but Claude Code still writes the text you typed, including the value you pass to `/infisical-secret-scanner:allow` or `/infisical-secret-scanner:disallow`, to local files such as your prompt history and the session transcript. See [Claude Code's local data](https://code.claude.com/docs/en/claude-directory).
 - A developer can turn off the plugin or all hooks in their own Claude Code settings. To require it for every developer, install it through a managed settings file.
 
 ## Test locally
