@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # UserPromptSubmit hook: scans the prompt on this machine with `infisical scan --pipe` and blocks it when it holds a
-# secret that hasn't been allowed. It also runs /infisical-secret-scanner:allow-secret and
-# /infisical-secret-scanner:disallow-secret itself, so the value given to those commands is never sent to Claude.
+# secret that hasn't been allowed. It also runs /infisical-secret-scanner:allow and
+# /infisical-secret-scanner:disallow itself, so the value given to those commands is never sent to Claude.
 # Nothing is sent to Infisical. Any failure blocks the prompt.
 
 set -o pipefail
 
-ALLOW_COMMAND="/infisical-secret-scanner:allow-secret"
-DISALLOW_COMMAND="/infisical-secret-scanner:disallow-secret"
+ALLOW_COMMAND="/infisical-secret-scanner:allow"
+DISALLOW_COMMAND="/infisical-secret-scanner:disallow"
 LEAK_EXIT_CODE=42
 # Claude Code gives the hook CLAUDE_PLUGIN_ROOT, the plugin's installed folder, and CLAUDE_PLUGIN_DATA, a folder for the
 # plugin's data that is kept across plugin updates.
