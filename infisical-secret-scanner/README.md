@@ -10,11 +10,11 @@ Everything runs on your machine. The plugin scans each prompt with the Infisical
 2. If the scan finds no secret, or only secrets you allowed, the prompt goes to Claude.
 3. If it finds a secret, the prompt is not sent. You see which rules matched, on which line, and the first characters of each secret. Claude never sees the prompt or the message.
 
-The plugin fails closed: if the CLI or `jq` is missing, if the scan fails, or if the hook crashes or times out, the prompt is not sent.
+The plugin fails closed: if it finds no Infisical CLI, if `jq` is missing, if the scan fails, or if the hook crashes or times out, the prompt is not sent.
 
 ## Requirements
 
-- [Infisical CLI](https://infisical.com/docs/cli/overview). Use a recent version; the plugin is tested with 0.45.4.
+- Infisical CLI. If you don't have it, run `/infisical-secret-scanner:install-cli` (see [Infisical CLI](#infisical-cli)) or [install it yourself](https://infisical.com/docs/cli/overview). The plugin is tested with 0.45.4.
 - [jq](https://jqlang.org/download)
 - Claude Code 2.1.295 or later. Older versions let a prompt through when the hook times out.
 
@@ -24,6 +24,29 @@ The plugin fails closed: if the CLI or `jq` is missing, if the scan fails, or if
 claude plugin marketplace add Infisical/claude-code-plugin
 claude plugin install infisical-secret-scanner@infisical
 ```
+
+## Infisical CLI
+
+The plugin scans with the first Infisical CLI that it finds:
+
+1. The CLI that `/infisical-secret-scanner:install-cli` installed in `~/.claude/plugins/data/infisical-secret-scanner-infisical/bin/`.
+2. `infisical` on your `PATH`.
+
+If it finds neither, it blocks the prompt and tells you to run this command:
+
+```
+/infisical-secret-scanner:install-cli
+```
+
+A separate hook handles this command, so the command works when no CLI is installed, for example in a cloud session that started without one. The command:
+
+1. Downloads Infisical CLI 0.45.4 for your platform from the Infisical CLI releases on GitHub.
+2. Checks the SHA-256 hash of the download against the hash that ships with the plugin. If the hashes are different, it installs nothing.
+3. Installs the CLI in the folder above. The CLI uses about 160 MB of disk space.
+
+The plugin downloads the CLI only when you run this command. It does not change your `PATH` or other programs, and uninstalling the plugin deletes the folder. Run the command again to reinstall the CLI, or to use the tested version instead of an older CLI on your `PATH`.
+
+The command needs access to `github.com` and `release-assets.githubusercontent.com`. In Claude Code on the web, the default network access ("Limited" with "Allow package managers") allows both. The command supports macOS, Linux, and Windows on x86-64 and ARM64. On other platforms, [install the CLI yourself](https://infisical.com/docs/cli/overview).
 
 ## Allow a secret
 
@@ -69,3 +92,11 @@ From the root of this repository:
 ```
 claude --plugin-dir ./infisical-secret-scanner
 ```
+
+## Pin a new CLI version
+
+1. In [`scripts/install-cli.sh`](scripts/install-cli.sh), set `CLI_VERSION`.
+2. Download the checksum files of the release: `gh release download v<version> -R Infisical/cli -p 'checksums*.txt'`.
+3. Copy the hashes of the six archives from `checksums.txt` and `checksums-darwin.txt` into `scripts/install-cli.sh`.
+4. Change the tested version in this README.
+5. Increase `version` in [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json). Claude Code updates the plugin only when this value changes.

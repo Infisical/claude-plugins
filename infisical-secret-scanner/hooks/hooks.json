@@ -9,6 +9,13 @@
             "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/scan-prompt.sh"],
             "timeout": 30,
             "onFailure": "block"
+          },
+          {
+            "type": "command",
+            "command": "bash",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/install-cli-command.sh"],
+            "timeout": 120,
+            "onFailure": "block"
           }
         ]
       }

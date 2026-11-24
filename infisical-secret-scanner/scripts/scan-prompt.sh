@@ -6,6 +6,12 @@
 
 set -o pipefail
 
+# Exit code 2 blocks the prompt.
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh" 2>/dev/null || {
+  echo "Infisical: could not load the plugin's scripts, so the prompt was not sent. Reinstall the plugin." >&2
+  exit 2
+}
+
 ALLOW_COMMAND="/infisical-secret-scanner:allow"
 DISALLOW_COMMAND="/infisical-secret-scanner:disallow"
 LEAK_EXIT_CODE=42
@@ -20,46 +26,28 @@ ALLOWLIST="$DATA_DIR/allowlist"
 # The scan must not reach the network: no telemetry event, no update check.
 export INFISICAL_DISABLE_TELEMETRY=1 INFISICAL_DISABLE_UPDATE_CHECK=1
 
-# Ends the turn without sending the prompt, and shows the message to the user only. suppressOriginalPrompt keeps the
-# prompt, which can hold a secret, out of the message.
-block() {
-  # Every message starts with two line breaks.
-  local reason=$'\n'"$1"
-
-  if command -v jq >/dev/null 2>&1; then
-    jq -n --arg reason "$reason" \
-      '{decision: "block", reason: $reason, hookSpecificOutput: {hookEventName: "UserPromptSubmit", suppressOriginalPrompt: true}}' &&
-      exit 0
-  else
-    local json="${reason//\\/\\\\}"
-    json="${json//\"/\\\"}"
-    json="${json//$'\n'/\\n}"
-    printf '{"decision": "block", "reason": "%s", "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": true}}\n' "$json" &&
-      exit 0
-  fi
-  # The JSON could not be written, for example because jq is installed but can't run. Exit code 2 also blocks the
-  # prompt and shows stderr to the user only.
-  printf '%s\n' "$reason" >&2
-  exit 2
-}
-
-sha256() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum
-  else
-    shasum -a 256
-  fi | cut -d ' ' -f 1
-}
-
 # Usage: scan <input file> <report file>. Returns 0 for no secrets and LEAK_EXIT_CODE for secrets. It runs from the
 # private folder, so files in the user's project, such as a .infisical-scan.toml, can't change the result.
 scan() {
-  (cd "$tmp" && infisical scan --pipe --config "$SCAN_CONFIG" --silent --no-color \
+  (cd "$tmp" && "$INFISICAL" scan --pipe --config "$SCAN_CONFIG" --silent --no-color \
     --exit-code "$LEAK_EXIT_CODE" --report-format json --report-path "$2" <"$1" >/dev/null 2>&1)
 }
 
 scan_failed() {
-  block "Infisical: the secret scan failed (exit code $1), so the prompt was not sent. Run 'infisical scan --pipe --config $SCAN_CONFIG' to see the error, and update the Infisical CLI if it is out of date."
+  block "Infisical: the secret scan failed (exit code $1), so the prompt was not sent. Run '$INFISICAL scan --pipe --config $SCAN_CONFIG' to see the error. If the Infisical CLI is out of date, run $INSTALL_COMMAND to install the version this plugin is tested with."
+}
+
+# Sets INFISICAL to the CLI to scan with: first the one that $INSTALL_COMMAND installed in the plugin's data folder,
+# then one on PATH. Returns 1 when there is neither.
+find_cli() {
+  local name
+  for name in infisical infisical.exe; do
+    if [ -f "$DATA_DIR/bin/$name" ] && [ -x "$DATA_DIR/bin/$name" ]; then
+      INFISICAL="$DATA_DIR/bin/$name"
+      return 0
+    fi
+  done
+  INFISICAL="$(command -v infisical 2>/dev/null)" && [ -n "$INFISICAL" ]
 }
 
 is_allowed() {
@@ -149,12 +137,19 @@ trap 'rm -rf "$tmp"' EXIT
 
 cat >"$tmp/input.json" || block "Infisical: could not read the prompt to scan it, so it was not sent."
 
-command -v infisical >/dev/null 2>&1 ||
-  block "Infisical: the Infisical CLI is not installed, so prompts can't be scanned for secrets and are not sent. Install it: https://infisical.com/docs/cli/overview"
 command -v jq >/dev/null 2>&1 ||
   block "Infisical: jq is not installed, so prompts can't be scanned for secrets and are not sent. Install it: https://jqlang.org/download"
 [ -n "$CLAUDE_PLUGIN_ROOT" ] && [ -n "$DATA_DIR" ] ||
   block "Infisical: Claude Code did not give the hook the plugin's folders, so prompts can't be scanned for secrets and are not sent. Update Claude Code."
+
+# install-cli-command.sh, a separate hook, runs this command and blocks it. The prompt holds nothing else to scan, and
+# it must pass here when no CLI is installed. With more text after the command, the prompt is scanned as usual.
+jq -e --arg command "$INSTALL_COMMAND" '(.prompt // "") | test("\\A\\s*" + $command + "\\s*\\z")' "$tmp/input.json" \
+  >/dev/null 2>&1 && exit 0
+
+find_cli ||
+  block "Infisical: the Infisical CLI is not installed, so prompts can't be scanned for secrets and are not sent.
+Run $INSTALL_COMMAND to download the CLI from GitHub into this plugin's data folder, or install it yourself: $CLI_DOCS_URL"
 
 SCAN_CONFIG="${CLAUDE_PLUGIN_ROOT}/config/infisical-scan.toml"
 [ -f "$DATA_DIR/infisical-scan.toml" ] && SCAN_CONFIG="$DATA_DIR/infisical-scan.toml"
